@@ -143,19 +143,15 @@ def load_google_sheet():
     return conn.read(worksheet="Sheet1")
 
 try:
-    st.subheader("Google Sheet Data (Sheet1)")
+    # st.subheader("Google Sheet Data (Sheet1)")
     df_gsheets = load_google_sheet()
-
     df_gsheets.columns = [c.strip().lower() for c in df_gsheets.columns]
-    st.write("Normalized Google Sheet Columns:", df_gsheets.columns.tolist())
-
-    st.dataframe(df_gsheets)
-
+    # st.write("Normalized Google Sheet Columns:", df_gsheets.columns.tolist())
+    # st.dataframe(df_gsheets)
 except Exception as e:
     st.error(f"Error fetching Google Sheet: {e}")
     df_gsheets = pd.DataFrame()
 
-# Processing Excel files
 if uploaded_files:
     if len(uploaded_files) == 1:
         df1 = load_file(uploaded_files[0])
@@ -198,28 +194,16 @@ if uploaded_files:
             suffixes=("_File1", "_File2")
         )
 
-        st.subheader("Merged Data (RTF Cleaned)")
-        st.dataframe(merged_df)
+        extracted = merged_df["Further Description"].apply(extract_details)
+        extracted.columns = all_extract_cols
 
-        st.subheader("Extracted Details Table from Merged Data")
-        if "Further Description" in merged_df.columns:
-            extracted = merged_df["Further Description"].apply(extract_details)
-            extracted.columns = all_extract_cols
-        else:
-            extracted = pd.DataFrame(columns=all_extract_cols)
-
-        st.dataframe(extracted)
-
-        st.subheader("Order & Type Classification")
         order_type = merged_df.apply(classify_order_type, axis=1)
         order_type.columns = ["ORDER", "TYPE"]
-        st.dataframe(order_type)
 
         combined_df = pd.concat([merged_df.reset_index(drop=True), extracted.reset_index(drop=True), order_type], axis=1)
-
         filled_df = combined_df.copy()
 
-        if not df_gsheets.empty and "item code" in df_gsheets.columns and "model" in df_gsheets.columns:
+        try:
             lookup_df = pd.DataFrame({
                 "item_code_full": df_gsheets["item code"].astype(str).str.strip(),
                 "model": df_gsheets["model"].astype(str).str.strip()
@@ -228,24 +212,19 @@ if uploaded_files:
             filled_df["Item Code"] = filled_df["Item Code"].astype(str).str.strip()
             filled_df["Detail Description 2"] = filled_df["Detail Description 2"].astype(str).str.strip()
 
-            # First pass: Item Code
             cross_item = filled_df.assign(key=1).merge(
                 lookup_df.assign(key=1),
                 on="key"
             ).drop("key", axis=1)
 
             mask_item = cross_item.apply(lambda x: x["item_code_full"].startswith(x["Item Code"]), axis=1)
-            cross_item = cross_item[mask_item]
-
-            cross_item = cross_item.sort_values(["PI"]).drop_duplicates(subset=["PI"], keep="first")
-
+            cross_item = cross_item[mask_item].sort_values("PI").drop_duplicates("PI")
             filled_df = filled_df.merge(
                 cross_item[["PI", "item_code_full", "model"]],
                 on="PI",
                 how="left"
             ).rename(columns={"item_code_full": "ITEM_CODE_2", "model": "MODEL"})
 
-            # Second pass: Detail Description 2 cleaned
             no_match_rows = filled_df["ITEM_CODE_2"].isna()
             if no_match_rows.any():
                 filled_df.loc[no_match_rows, "Detail Description 2 Cleaned"] = (
@@ -255,7 +234,6 @@ if uploaded_files:
                 )
 
                 to_match_df = filled_df.loc[no_match_rows].copy()
-
                 cross_desc = to_match_df.assign(key=1).merge(
                     lookup_df.assign(key=1),
                     on="key"
@@ -265,9 +243,7 @@ if uploaded_files:
                     lambda x: x["item_code_full"].startswith(x["Detail Description 2 Cleaned"]),
                     axis=1
                 )
-                cross_desc = cross_desc[mask_desc]
-
-                cross_desc = cross_desc.sort_values(["PI"]).drop_duplicates(subset=["PI"], keep="first")
+                cross_desc = cross_desc[mask_desc].sort_values("PI").drop_duplicates("PI")
 
                 filled_df.loc[no_match_rows, ["ITEM_CODE_2", "MODEL"]] = filled_df.loc[no_match_rows].merge(
                     cross_desc[["PI", "item_code_full", "model"]],
@@ -275,56 +251,56 @@ if uploaded_files:
                     how="left"
                 )[["item_code_full", "model"]].values
 
-        else:
-            st.warning("Google Sheet columns 'item code' and 'model' not found after normalization.")
+        except Exception as e:
+            st.error(f"Error loading Google Sheet: {e}")
 
-        # Extract REMARK DELIVERY
-        def extract_remark_delivery(text):
-            if not isinstance(text, str):
-                return ""
-            match = re.search(r"REMARK DELIVERY\s*:\s*(.*)", text, flags=re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-            return ""
-
-        filled_df["REMARK DELIVERY"] = filled_df["Further Description"].apply(extract_remark_delivery)
-
-        st.subheader("Table with Extracted REMARK DELIVERY")
-        st.dataframe(filled_df[["PI", "REMARK DELIVERY"]])
-
-        st.subheader("Table with Matched Item Code and Model (fast vectorized with cleaned fallback)")
-        # Remove rows without PI
-        filled_df = filled_df[filled_df["PI"].notna() & (filled_df["PI"].astype(str).str.strip() != "")]
-        st.dataframe(filled_df)
-
-        available_columns = [col for col in default_order if col in filled_df.columns]
-        selected_columns = st.multiselect(
-            "Choose columns (you can drop unwanted columns):",
-            options=filled_df.columns.tolist(),
-            default=available_columns
+        filled_df["REMARK DELIVERY"] = filled_df["Further Description"].apply(
+            lambda text: re.search(r"REMARK DELIVERY\s*:\s*(.*)", text, flags=re.IGNORECASE).group(1).strip()
+            if isinstance(text, str) and re.search(r"REMARK DELIVERY\s*:\s*(.*)", text, flags=re.IGNORECASE)
+            else ""
         )
 
-        if selected_columns:
-            st.subheader("Drag and Drop to Reorder Columns")
-            reordered = sort_items(
-                items=selected_columns,
-                key="reorder"
+        filled_df = filled_df[filled_df["PI"].notna() & (filled_df["PI"].astype(str).str.strip() != "")]
+
+        with st.expander(label="Debugging Information", expanded=False):
+            st.subheader("Google Sheet Data (Sheet1)")
+            st.dataframe(df_gsheets)
+
+            st.subheader("Merged Data (RTF Cleaned)")
+            st.dataframe(merged_df)
+
+            st.subheader("Extracted Details Table from Merged Data")
+            st.dataframe(extracted)
+
+            st.subheader("Order & Type Classification")
+            st.dataframe(order_type)
+
+            st.subheader("Table with Extracted REMARK DELIVERY")
+            st.dataframe(filled_df[["PI", "REMARK DELIVERY"]])
+
+            st.subheader("Table with Matched Item Code and Model (fast vectorized with cleaned fallback)")
+            st.dataframe(filled_df)
+
+            available_columns = [col for col in default_order if col in filled_df.columns]
+            selected_columns = st.multiselect(
+                "Choose columns (you can drop unwanted columns):",
+                options=filled_df.columns.tolist(),
+                default=available_columns
             )
 
-            reordered_df = filled_df[reordered]
+            if selected_columns:
+                st.subheader("Drag and Drop to Reorder Columns")
+                reordered = sort_items(
+                    items=selected_columns,
+                    key="reorder"
+                )
 
-            st.subheader("Final Reordered Data")
-            st.dataframe(reordered_df)
+                reordered_df = filled_df[reordered]
 
-            # csv = reordered_df.to_csv(index=False).encode("utf-8")
-            # st.download_button(
-            #     "Download Final CSV",
-            #     csv,
-            #     "merged_reordered.csv",
-            #     "text/csv"
-            # )
+                st.subheader("Final Reordered Data")
+                st.dataframe(reordered_df)
 
-            # Rename columns for new view
+        if selected_columns:
             renamed_df = reordered_df.rename(columns={
                 "Doc Date": "TIMESTAMP",
                 "PI": "PI NUMBER",
@@ -333,33 +309,27 @@ if uploaded_files:
                 "Qty": "QTY"
             })
 
-            st.subheader("Table with Renamed Columns")
-            st.dataframe(renamed_df)
-
-            # Ensure TIMESTAMP formatting
             if "TIMESTAMP" in renamed_df.columns:
                 renamed_df["TIMESTAMP"] = pd.to_datetime(renamed_df["TIMESTAMP"]).dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Create a copy to modify for copy-paste
-            copy_df = renamed_df.copy()
+            st.subheader("Table with Renamed Columns")
+            st.dataframe(renamed_df)
 
-            # Insert empty column after TIMESTAMP
+            copy_df = renamed_df.copy()
             if "TIMESTAMP" in copy_df.columns:
                 cols = list(copy_df.columns)
                 idx = cols.index("TIMESTAMP")
-                cols.insert(idx + 1, " ")  # Name can be anything
+                cols.insert(idx + 1, " ")
                 copy_df[" "] = ""
                 copy_df = copy_df[cols]
 
             tsv_no_header = copy_df.to_csv(sep="\t", index=False, header=False)
-            st.subheader("Copy Data Rows to Google Sheets (No Column Names, Extra Blank Column)")
 
+            st.subheader("Copy Data Rows to Google Sheets (No Column Names, Extra Blank Column)")
             st.text_area(
                 "1. Select all text below\n2. Copy (Ctrl+C)\n3. Paste into Google Sheets\n4. Use Data > Split text to columns > Tab",
                 tsv_no_header,
                 height=300
             )
-
-
         else:
             st.warning("Please select at least one column.")
