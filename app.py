@@ -5,7 +5,9 @@ from streamlit_sortables import sort_items
 import re
 from streamlit_gsheets import GSheetsConnection
 
-st.title("Excel Processor with RTF Cleaning, Detail Extraction, Order Classification, and Google Sheet Data")
+st.set_page_config(layout="wide")
+
+st.title("Sales Co Apps 2.0 - Autocount Data Integrator")
 
 uploaded_files = st.file_uploader(
     "Upload 1 or 2 Excel files",
@@ -312,7 +314,7 @@ if uploaded_files:
             if "TIMESTAMP" in renamed_df.columns:
                 renamed_df["TIMESTAMP"] = pd.to_datetime(renamed_df["TIMESTAMP"]).dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            st.subheader("Table with Renamed Columns")
+            st.subheader("Sales Co Apps 2.0 - Data Integrator Output")
             st.dataframe(renamed_df)
 
             copy_df = renamed_df.copy()
@@ -325,9 +327,9 @@ if uploaded_files:
 
             tsv_no_header = copy_df.to_csv(sep="\t", index=False, header=False)
 
-            st.subheader("Copy Data Rows to Google Sheets (No Column Names, Extra Blank Column)")
+            st.subheader("Data to Copy in Sales Co Apps 2.0")
             st.text_area(
-                "1. Select all text below\n2. Copy (Ctrl+C)\n3. Paste into Google Sheets\n4. Use Data > Split text to columns > Tab",
+                "Select all text (Ctrl+A) and copy (Ctrl+C) to clipboard, then (Ctrl+V) paste in Sales Co Apps 2.0",
                 tsv_no_header,
                 height=300
             )
